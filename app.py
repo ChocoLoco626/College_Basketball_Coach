@@ -297,6 +297,20 @@ def _num(v, default=0.0):
     except (TypeError, ValueError):
         return default
 
+def job_tier(program_prestige):
+    p=_num(program_prestige,50)
+    if p>=88: return "Elite"
+    if p>=78: return "High Major"
+    if p>=66: return "Major"
+    if p>=52: return "Mid Major"
+    return "Low Major"
+
+def coach_can_apply(program_prestige, coach_prestige):
+    pp=_num(program_prestige,50); cp=_num(coach_prestige,50)
+    # Hard eligibility bands. Exceptional seasons can later raise prestige.
+    minimum=max(0, pp-28)
+    return cp>=minimum
+
 def career_offer_score(t, profile):
     """Score a school's willingness to hire this coach."""
     prestige=_num(profile.get("prestige",50),50)
@@ -319,7 +333,10 @@ def contract_terms(t, profile, years=None):
 
 def generate_job_openings(g):
     openings=[]
+    coach_prestige=_num(profile.get("prestige",50),50)
     for t in g["teams"]:
+        if not coach_can_apply(t.adjusted_prestige, coach_prestige):
+            continue
         security=_num(getattr(t,"security",50),50)
         wins=_num(getattr(t,"wins",0),0)
         if random.random()<.28 or security<35 or wins<expected_wins(t)-4:
@@ -375,8 +392,23 @@ def generate_job_market(g, profile):
     return sorted(openings,key=lambda x:x["fit"],reverse=True)
 
 def make_contract(t, profile, offer):
-    t.coach=Coach(profile.get("name","Coach"),**{k:profile[k] for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]},salary=offer["salary"])
-    return {"team":t.name,"years":offer["years"],"salary":offer["salary"],"buyout":offer["buyout"]}
+    t.coach=Coach(
+        profile.get("name","Coach"),
+        prestige=_num(profile.get("prestige",50),50),
+        offense=_num(profile.get("offense",55),55),
+        defense=_num(profile.get("defense",55),55),
+        recruiting=_num(profile.get("recruiting",55),55),
+        development=_num(profile.get("development",50),50),
+        adaptability=_num(profile.get("adaptability",60),60),
+        motivation=_num(profile.get("motivation",65),65),
+        discipline=_num(profile.get("discipline",60),60),
+        loyalty=_num(profile.get("loyalty",55),55),
+        nil=_num(profile.get("nil",50),50),
+        salary=int(offer["salary"])
+    )
+    return {"team":t.name,"years":offer["years"],"remaining_years":offer["years"],
+            "salary":offer["salary"],"buyout":offer.get("buyout",0),"extension":False}
+
 
 def new_game():
     teams=new_world()
@@ -442,9 +474,14 @@ if g["user"] is None:
         coach_name=st.text_input("Coach name",value=g.get("coach_name","Coach"),max_chars=32)
         g["coach_name"]=coach_name.strip() or "Coach"
         st.subheader("Your coaching profile")
-        cp=g.get("career_profile") or {"prestige":50,"offense":55,"defense":55,"recruiting":55,"development":50,"adaptability":60,"motivation":65,"discipline":60,"nil":50}
+        cp=g.get("career_profile") or {"prestige":50,"offense":55,"defense":55,"recruiting":55,"development":50,"adaptability":60,"motivation":65,"discipline":60,"loyalty":55,"nil":50}
         x1,x2,x3=st.columns(3)
-        cp["prestige"]=x1.slider("Starting prestige",20,90,int(cp["prestige"]))
+        if "career_started" not in g:
+            tier=x1.selectbox("Starting prestige tier",["Low Major (35)","Mid Major (50)","High Major (65)"])
+            cp["prestige"]=int(tier.split("(")[1].rstrip(")"))
+            g["career_started"]=True
+        else:
+            x1.metric("Starting prestige", int(cp.get("prestige",50)))
         cp["offense"]=x2.slider("Offense",30,90,int(cp["offense"]))
         cp["defense"]=x3.slider("Defense",30,90,int(cp["defense"]))
         y1,y2,y3=st.columns(3)
@@ -452,6 +489,8 @@ if g["user"] is None:
         cp["development"]=y2.slider("Development",30,90,int(cp["development"]))
         cp["motivation"]=y3.slider("Motivation",30,90,int(cp["motivation"]))
         cp={k:_num(v,50) for k,v in cp.items()}
+        cp.setdefault("loyalty",55)
+        cp["name"]=g.get("coach_name","Coach")
         g["career_profile"]=cp
         if not g.get("job_market"):
             g["job_market"]=generate_job_market(g,cp)
@@ -498,7 +537,7 @@ with st.sidebar:
         st.session_state.g=new_game();st.rerun()
     if g.get("career_mode") and st.button("Resign / Enter Job Market",use_container_width=True):
         g["career_history"].append({"Year":g["year"],"Action":"Resigned","Team":u.name,"Salary":u.coach.salary,"Years":0})
-        g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]}
+        g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","loyalty","nil"]}
         g["career_profile"]["name"]=g.get("coach_name",u.coach.name)
         g["user"]=None;g["contract"]=None
         g["job_market"]=generate_job_market(g,g["career_profile"])
@@ -674,7 +713,7 @@ with tabs[14]:
                 st.info("You can request an extension when two or fewer years remain.")
         if c2.button("Resign"):
             g["career_history"].append({"Year":g["year"],"Action":"Resigned","Team":u.name,"Salary":ct["salary"],"Years":ct.get("remaining_years",ct["years"])})
-            g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]}
+            g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","loyalty","nil"]}
             g["career_profile"]["name"]=g.get("coach_name",u.coach.name)
             g["user"]=None
             g["contract"]=None
@@ -692,6 +731,7 @@ with tabs[14]:
         school=next(t for t in g["teams"] if t.name==opening["team"])
         prof=g.get("career_profile") or {"prestige":u.coach.prestige,"recruiting":u.coach.recruiting,"development":u.coach.development,"motivation":u.coach.motivation}
         fit,need=career_offer_score(school,prof)
+        st.write(f"Job tier: **{job_tier(school.adjusted_prestige)}**")
         st.write(f"Interview fit: **{fit:.1f}** vs required **{need:.1f}**")
         if st.button("Interview for Job"):
             if fit>=need:
@@ -715,7 +755,20 @@ with tabs[14]:
                 if st.session_state.get("offer_status")=="counter":
                     st.warning(f"School counteroffer: ${offer['salary']:,}/year.")
                 if st.button("Accept Contract"):
-                    school.coach=Coach(g.get("coach_name","Coach"),**{k:prof[k] for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]},salary=offer["salary"])
+                    school.coach=Coach(
+                        g.get("coach_name","Coach"),
+                        prestige=_num(prof.get("prestige",50),50),
+                        offense=_num(prof.get("offense",55),55),
+                        defense=_num(prof.get("defense",55),55),
+                        recruiting=_num(prof.get("recruiting",55),55),
+                        development=_num(prof.get("development",50),50),
+                        adaptability=_num(prof.get("adaptability",60),60),
+                        motivation=_num(prof.get("motivation",65),65),
+                        discipline=_num(prof.get("discipline",60),60),
+                        loyalty=_num(prof.get("loyalty",55),55),
+                        nil=_num(prof.get("nil",50),50),
+                        salary=int(offer["salary"])
+                    )
                     g["contract"]=offer
                     g["user"]=school.name
                     g["career_mode"]=True
