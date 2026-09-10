@@ -51,12 +51,20 @@ class Team:
     wins:int=0; losses:int=0; cwins:int=0; closses:int=0; net:float=50; sos:float=50; security:float=70; schedule:List[Game]=field(default_factory=list)
     history:Dict[str,int]=field(default_factory=lambda:{"titles":0,"final_fours":0,"elite_eights":0,"sweet_sixteens":0,"tournament_apps":0,"conference_titles":0,"winning_seasons":0,"nba_draftees":0})
     awards:List[str]=field(default_factory=list); facilities_level:int=1; scholarships:int=13
+    def coach_obj(self):
+        if isinstance(self.coach, Coach):
+            return self.coach
+        self.coach = coach_for(self.current)
+        return self.coach
+
     @property
     def adjusted_prestige(self):
-        return clamp(.22*self.historical+.28*self.current+.12*self.facilities*10+.12*self.recruiting_prestige+.10*self.coach.prestige+.08*self.academics+.08*self.net)
+        coach = self.coach_obj()
+        return clamp(.22*self.historical+.28*self.current+.12*self.facilities*10+.12*self.recruiting_prestige+.10*coach.prestige+.08*self.academics+.08*self.net)
     @property
     def recruiting_prestige(self):
-        return clamp(.42*self.current+.18*self.historical+.12*self.facilities*10+.13*self.coach.recruiting+.10*self.coach.prestige+.05*min(100,self.nil_budget/100000))
+        coach = self.coach_obj()
+        return clamp(.42*self.current+.18*self.historical+.12*self.facilities*10+.13*coach.recruiting+.10*coach.prestige+.05*min(100,self.nil_budget/100000))
     def ratings(self):
         ps=sorted(self.roster,key=lambda p:p.overall,reverse=True)
         top=ps[:10] or [Player("x","PG",50,50,50,50,50,50,50,50,50,50,72,1,50)]
@@ -274,10 +282,30 @@ def offseason(g):
         t.current=clamp(t.current+(t.wins/35-.5)*10)
     g["year"]+=1;g["recruits"]=recruit_pool();make_schedule(g);g["season_stage"]="preseason"
 
+def expected_wins(t):
+    return max(8, round(t.current/100*25 + (t.adjusted_prestige-70)*.10))
+
+def generate_job_market(g, profile):
+    openings=[]
+    for t in g["teams"]:
+        if random.random() < .25 or t.security < 35 or t.wins < expected_wins(t)-4:
+            need=72-t.adjusted_prestige*.48
+            fit=(profile["prestige"]*.38+profile["recruiting"]*.08+profile["development"]*.08+
+                 profile["motivation"]*.06+(100-t.current)*.16+t.academics*.06+
+                 random.Random(t.espn_id+g["year"]*13).uniform(-5,5))
+            if fit>=need:
+                openings.append({"team":t.name,"fit":fit,"salary":int(250000+t.adjusted_prestige*30000),
+                                 "years":random.choice([3,4,5]),"buyout":0})
+    return sorted(openings,key=lambda x:x["fit"],reverse=True)
+
+def make_contract(t, profile, offer):
+    t.coach=Coach("You",**{k:profile[k] for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]},salary=offer["salary"])
+    return {"team":t.name,"years":offer["years"],"salary":offer["salary"],"buyout":offer["buyout"]}
+
 def new_game():
     teams=new_world()
     g={"year":2026,"teams":teams,"recruits":recruit_pool(),"portal":[],"free_coaches":[],"user":None,
-       "season_stage":"preseason","history":[],"champion":None,"rounds":[],"field":[],"news":[]}
+       "season_stage":"preseason","history":[],"champion":None,"rounds":[],"field":[],"news":[],"career_mode":False,"job_market":[],"contract":None,"career_history":[],"career_profile":None}
     make_schedule(g);return g
 
 def enc(x):
@@ -295,13 +323,48 @@ def dec(x):
 
 if "g" not in st.session_state:st.session_state.g=new_game()
 g=st.session_state.g
+for _team in g["teams"]:
+    if not isinstance(_team.coach, Coach):
+        _team.coach=coach_for(_team.current)
+    if not isinstance(_team.staff,list) or not _team.staff:
+        _team.staff=staff_for(_team.current)
+g.setdefault("career_mode",False); g.setdefault("job_market",[]); g.setdefault("contract",None)
+g.setdefault("career_history",[]); g.setdefault("career_profile",None)
 if g["user"] is None:
     st.title("🏀 College Basketball Coach Simulator — Deep Dynasty")
-    st.write("Choose a real program. The simulation data for players and coaches is generated for the game.")
-    school=st.selectbox("Start your career",[t.name for t in g["teams"]])
-    if st.button("Start Dynasty",type="primary"):
-        g["user"]=school;st.rerun()
-    st.info("The deep engine includes a multi-season loop, coaching carousel, recruiting/NIL, portal, facilities, staff, game plans, fatigue, fouls, player development, conference tournaments and a 76-team postseason.")
+    mode=st.radio("Career mode",["Choose any school","Career mode — only schools that offer you"],horizontal=True)
+    if mode=="Choose any school":
+        school=st.selectbox("Start your career",[t.name for t in g["teams"]])
+        if st.button("Start Dynasty",type="primary"):
+            g["user"]=school;g["career_mode"]=False;st.rerun()
+    else:
+        st.subheader("Your coaching profile")
+        cp=g.get("career_profile") or {"prestige":50,"offense":55,"defense":55,"recruiting":55,"development":50,"adaptability":60,"motivation":65,"discipline":60,"nil":50}
+        x1,x2,x3=st.columns(3)
+        cp["prestige"]=x1.slider("Starting prestige",20,90,int(cp["prestige"]))
+        cp["offense"]=x2.slider("Offense",30,90,int(cp["offense"]))
+        cp["defense"]=x3.slider("Defense",30,90,int(cp["defense"]))
+        y1,y2,y3=st.columns(3)
+        cp["recruiting"]=y1.slider("Recruiting",30,90,int(cp["recruiting"]))
+        cp["development"]=y2.slider("Development",30,90,int(cp["development"]))
+        cp["motivation"]=y3.slider("Motivation",30,90,int(cp["motivation"]))
+        g["career_profile"]=cp
+        if not g.get("job_market"):
+            g["job_market"]=generate_job_market(g,cp)
+        offers=g["job_market"]
+        st.write(f"**{len(offers)} schools** currently offer you a job.")
+        if offers:
+            selected=st.selectbox("Job offers",offers,format_func=lambda o:f"{o['team']} — ${o['salary']:,}/yr • {o['years']} years")
+            chosen=next(t for t in g["teams"] if t.name==selected["team"])
+            st.caption(f"Prestige {chosen.adjusted_prestige:.0f} • Current {chosen.current:.0f} • Budget ${chosen.budget/1e6:.1f}M • NIL ${chosen.nil_budget/1e6:.1f}M")
+            if st.button("Accept Job",type="primary"):
+                g["contract"]=make_contract(chosen,cp,selected)
+                g["user"]=chosen.name;g["career_mode"]=True;g["job_market"]=[]
+                g["career_history"].append({"Year":g["year"],"Action":"Hired","Team":chosen.name,"Salary":selected["salary"],"Years":selected["years"]})
+                st.rerun()
+        else:
+            st.warning("No offers at this profile. Raise prestige or use the open-school mode.")
+    st.info("Deep engine: coaching carousel, contracts, recruiting/NIL, portal, facilities, staff, game plans, fatigue, fouls, development, conference tournaments and a 76-team postseason.")
     st.stop()
 
 u=next(t for t in g["teams"] if t.name==g["user"])
@@ -327,8 +390,14 @@ with st.sidebar:
         offseason(g);st.rerun()
     if st.button("New Dynasty",use_container_width=True):
         st.session_state.g=new_game();st.rerun()
+    if g.get("career_mode") and st.button("Resign / Enter Job Market",use_container_width=True):
+        g["career_history"].append({"Year":g["year"],"Action":"Resigned","Team":u.name,"Salary":u.coach.salary,"Years":0})
+        g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","nil"]}
+        g["user"]=None;g["contract"]=None
+        g["job_market"]=generate_job_market(g,g["career_profile"])
+        st.rerun()
 
-tabs=st.tabs(["Dashboard","Game Day","Schedule","Roster","Tactics","Recruiting","NIL","Portal","Staff","Facilities","Rankings","Selection","Tournament","History","Save"])
+tabs=st.tabs(["Dashboard","Game Day","Schedule","Roster","Tactics","Recruiting","NIL","Portal","Staff","Facilities","Rankings","Selection","Tournament","History","Career","Save"])
 
 with tabs[0]:
     st.title("Program Dashboard")
@@ -475,6 +544,16 @@ with tabs[13]:
     if g["champion"]:st.success(f"Most recent champion: {g['champion']}")
 
 with tabs[14]:
+    st.header("Career & Contracts")
+    if g.get("contract"):
+        ct=g["contract"]
+        st.write(f"**Contract:** {ct['team']} • {ct['years']} years • ${ct['salary']:,}/year")
+    st.metric("Coach prestige",round(u.coach.prestige,1))
+    st.write("Career record:",f"{u.coach.wins}-{u.coach.losses}","Titles:",u.coach.titles)
+    if g.get("career_history"):
+        st.dataframe(g["career_history"],use_container_width=True,hide_index=True)
+
+with tabs[15]:
     st.header("Save / Load Dynasty")
     if st.button("Create Save JSON"):st.session_state.save=json.dumps(enc(g))
     save=st.text_area("Save data",st.session_state.get("save",""),height=260)
