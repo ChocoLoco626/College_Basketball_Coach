@@ -66,17 +66,23 @@ class Team:
         coach = self.coach_obj()
         return clamp(.42*self.current+.18*self.historical+.12*self.facilities*10+.13*coach.recruiting+.10*coach.prestige+.05*min(100,self.nil_budget/100000))
     def ratings(self):
-        ps=sorted(self.roster,key=lambda p:p.overall,reverse=True)
-        top=ps[:10] or [Player("x","PG",50,50,50,50,50,50,50,50,50,50,72,1,50)]
-        def av(k): return sum(getattr(p,k) for p in top)/len(top)
-        depth=clamp(sum(p.overall for p in ps)/max(1,len(ps))+min(10,len(ps)))
-        return dict(offense=clamp(.65*av("offense")+.18*self.coach.offense+.17*self.staff_rating("offense")),
-                    defense=clamp(.65*av("defense")+.18*self.coach.defense+.17*self.staff_rating("defense")),
-                    shooting=av("shooting"), passing=av("passing"), handling=av("handling"), rebounding=av("rebounding"),
-                    athleticism=av("athleticism"), iq=av("iq"), depth=depth)
-    def staff_rating(self,kind):
-        vals=[getattr(s,kind,50) for s in self.staff]
-        return sum(vals)/len(vals) if vals else 50
+        # Repair legacy saves where non-Player objects (such as Staff) ended up
+        # inside roster.
+        valid=[p for p in (self.roster or []) if isinstance(p, Player)]
+        self.roster=valid
+        ps=sorted(valid,key=lambda p:_num(getattr(p,"overall",50),50),reverse=True)
+        top=ps[:10]
+        if not top:
+            top=[Player("Replacement","PG",50,50,50,50,50,50,50,50,50,50,50)]
+        def av(k):
+            return sum(_num(getattr(p,k,50),50) for p in top)/len(top)
+        depth=clamp(sum(_num(getattr(p,"overall",50),50) for p in ps)/max(1,len(ps)) + min(10,len(ps))*0.25)
+        return {"overall":round(clamp(av("overall")*.78+depth*.22),1),
+                "offense":round(av("offense"),1),
+                "defense":round(av("defense"),1),
+                "shooting":round(av("shooting"),1),
+                "athleticism":round(av("athleticism"),1),
+                "depth":round(depth,1)}
 
 def coach_for(p):
     return Coach(nm(),clamp(random.gauss(p,9)),clamp(random.gauss(p,8)),clamp(random.gauss(p,8)),clamp(random.gauss(p,10)),clamp(random.gauss(p,8)),clamp(random.gauss(70,12)),clamp(random.gauss(72,10)),clamp(random.gauss(70,10)),clamp(random.gauss(70,10)),clamp(random.gauss(p,9)),int(max(300000,p*70000+random.gauss(0,150000))))
@@ -430,6 +436,18 @@ def dec(x):
     return x
 
 if "g" not in st.session_state:st.session_state.g=new_game()
+def normalize_roster_state(g):
+    for t in g["teams"]:
+        cleaned=[p for p in (t.roster or []) if isinstance(p, Player)]
+        if len(cleaned)<8:
+            positions=["PG","SG","SF","PF","C"]
+            for i in range(len(cleaned),13):
+                pos=positions[i%5]
+                base=int(_num(t.current,50))
+                ov=max(45,min(78,base-18+random.randint(0,23)))
+                cleaned.append(Player(f"{t.name} Player {i+1}",pos,ov,ov,ov,ov,ov,ov,ov,ov,ov,ov,ov))
+        t.roster=cleaned
+
 def normalize_team_state(g):
     for t in g["teams"]:
         # Repair common legacy list/int corruption in team-level numeric fields.
@@ -455,6 +473,7 @@ def normalize_team_state(g):
 
 g=st.session_state.g
 normalize_team_state(g)
+normalize_roster_state(g)
 for _team in g["teams"]:
     if not isinstance(_team.coach, Coach):
         _team.coach=coach_for(_team.current)
@@ -535,6 +554,11 @@ with st.sidebar:
         offseason(g);st.rerun()
     if st.button("New Dynasty",use_container_width=True):
         st.session_state.g=new_game();st.rerun()
+    if st.button("Repair Legacy Save",use_container_width=True):
+        normalize_team_state(g)
+        normalize_roster_state(g)
+        st.success("Legacy save repaired.")
+        st.rerun()
     if g.get("career_mode") and st.button("Resign / Enter Job Market",use_container_width=True):
         g["career_history"].append({"Year":g["year"],"Action":"Resigned","Team":u.name,"Salary":u.coach.salary,"Years":0})
         g["career_profile"]={k:getattr(u.coach,k) for k in ["prestige","offense","defense","recruiting","development","adaptability","motivation","discipline","loyalty","nil"]}
