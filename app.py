@@ -282,19 +282,48 @@ def offseason(g):
         t.current=clamp(t.current+(t.wins/35-.5)*10)
     g["year"]+=1;g["recruits"]=recruit_pool();make_schedule(g);g["season_stage"]="preseason"
 
+def _num(v, default=0.0):
+    """Convert legacy/corrupt Streamlit state values to a usable number."""
+    if isinstance(v, (list, tuple, set)):
+        if not v:
+            return default
+        v = next(iter(v))
+    if isinstance(v, dict):
+        for k in ("value", "score", "rating", "overall"):
+            if k in v:
+                v=v[k]; break
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
 def expected_wins(t):
-    return max(8, round(t.current/100*25 + (t.adjusted_prestige-70)*.10))
+    current=_num(getattr(t,"current",50),50)
+    prestige=_num(getattr(t,"adjusted_prestige",50),50)
+    return max(8, round(current/100*25 + (prestige-70)*.10))
 
 def generate_job_market(g, profile):
     openings=[]
     for t in g["teams"]:
-        if random.random() < .25 or t.security < 35 or t.wins < expected_wins(t)-4:
-            need=72-t.adjusted_prestige*.48
-            fit=(profile["prestige"]*.38+profile["recruiting"]*.08+profile["development"]*.08+
-                 profile["motivation"]*.06+(100-t.current)*.16+t.academics*.06+
-                 random.Random(t.espn_id+g["year"]*13).uniform(-5,5))
+        security=_num(getattr(t,"security",50),50)
+        wins=_num(getattr(t,"wins",0),0)
+        # Only use numeric values in the job-market comparison. This fixes
+        # legacy sessions where a team stat was accidentally stored as a list.
+        hot_seat = security < 35
+        underperforming = wins < expected_wins(t)-4
+        random_opening = random.random() < .25
+        if random_opening or hot_seat or underperforming:
+            need=72-_num(t.adjusted_prestige,50)*.48
+            fit=(_num(profile.get("prestige",50),50)*.38+
+                 _num(profile.get("recruiting",50),50)*.08+
+                 _num(profile.get("development",50),50)*.08+
+                 _num(profile.get("motivation",50),50)*.06+
+                 (100-_num(t.current,50))*.16+
+                 _num(t.academics,50)*.06+
+                 random.Random(str(t.espn_id)+str(g["year"])).uniform(-5,5))
             if fit>=need:
-                openings.append({"team":t.name,"fit":fit,"salary":int(250000+t.adjusted_prestige*30000),
+                openings.append({"team":t.name,"fit":fit,
+                                 "salary":int(250000+_num(t.adjusted_prestige,50)*30000),
                                  "years":random.choice([3,4,5]),"buyout":0})
     return sorted(openings,key=lambda x:x["fit"],reverse=True)
 
@@ -322,7 +351,31 @@ def dec(x):
     return x
 
 if "g" not in st.session_state:st.session_state.g=new_game()
+def normalize_team_state(g):
+    for t in g["teams"]:
+        # Repair common legacy list/int corruption in team-level numeric fields.
+        for attr, default in [
+            ("security",50),("wins",0),("losses",0),("current",50),
+            ("historical",50),("academics",70),("budget",5000000),("nil_budget",1000000)
+        ]:
+            value=getattr(t,attr,default)
+            if isinstance(value,list):
+                value=value[0] if value else default
+            try:
+                if attr in ("wins","losses","security","current","historical","academics"):
+                    value=int(float(value))
+                else:
+                    value=float(value)
+            except (TypeError,ValueError):
+                value=default
+            setattr(t,attr,value)
+        if not isinstance(t.coach, Coach):
+            t.coach=coach_for(t.current)
+        if not isinstance(t.staff,list) or not t.staff:
+            t.staff=staff_for(t.current)
+
 g=st.session_state.g
+normalize_team_state(g)
 for _team in g["teams"]:
     if not isinstance(_team.coach, Coach):
         _team.coach=coach_for(_team.current)
@@ -348,6 +401,7 @@ if g["user"] is None:
         cp["recruiting"]=y1.slider("Recruiting",30,90,int(cp["recruiting"]))
         cp["development"]=y2.slider("Development",30,90,int(cp["development"]))
         cp["motivation"]=y3.slider("Motivation",30,90,int(cp["motivation"]))
+        cp={k:_num(v,50) for k,v in cp.items()}
         g["career_profile"]=cp
         if not g.get("job_market"):
             g["job_market"]=generate_job_market(g,cp)
