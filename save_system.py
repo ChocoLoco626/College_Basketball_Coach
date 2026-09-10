@@ -17,8 +17,6 @@ def migrate_game_state(g):
     g.setdefault("career_mode",False); g.setdefault("career_started",False); g.setdefault("coach_name","Coach")
     g.setdefault("career_profile",None); g.setdefault("contract",None); g.setdefault("career_history",[])
     g.setdefault("job_market",[]); g.setdefault("recruit_pool",[]); g.setdefault("transfer_pool",[])
-    g.setdefault("last_season",None); g.setdefault("season_awards",[]); g.setdefault("season_started",False)
-    g.setdefault("fired",False); g.setdefault("departed_players",[]); g.setdefault("contract_expired",False)
     for t in g.get("teams",[]):
         t.roster=[normalize_player(p) for p in getattr(t,"roster",[]) if normalize_player(p)]
         while len(t.roster)<13:
@@ -28,9 +26,6 @@ def migrate_game_state(g):
         if not hasattr(t,"transfers"): t.transfers=[]
         if not hasattr(t,"fan_support"): t.fan_support=65
         if not hasattr(t,"boosters"): t.boosters=60
-        if not hasattr(t,"security"): t.security=60
-        if not hasattr(t,"budget"): t.budget=5_000_000
-        if not hasattr(t,"nil_budget"): t.nil_budget=1_000_000
     g["schema_version"]=SAVE_SCHEMA_VERSION
     return g
 

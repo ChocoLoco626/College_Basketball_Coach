@@ -6,7 +6,6 @@ from simulation import *
 from recruiting import *
 from career import *
 from save_system import *
-from dynasty import *
 
 st.set_page_config(page_title="College Basketball Coach Simulator",page_icon="🏀",layout="wide")
 if "g" not in st.session_state: st.session_state.g=new_game()
@@ -22,7 +21,7 @@ if g.get("user"):
     user=next(t for t in g["teams"] if t.name==g["user"])
 else: user=None
 
-tabs=st.tabs(["Career","Dashboard","Season Hub","Game Day","Recruiting","Transfer Portal","Schedule","Team","Staff","History"])
+tabs=st.tabs(["Career","Dashboard","Game Day","Recruiting","Transfer Portal","Schedule","Team","Staff","National","Conference","Postseason","History"])
 
 with tabs[0]:
     st.header("Career Mode")
@@ -40,9 +39,7 @@ with tabs[0]:
         cp=g["career_profile"]; cp.name=g["coach_name"]
         c=st.columns(4); c[0].metric("Prestige",f"{cp.prestige:.1f}"); c[1].metric("Career W",cp.career_wins)
         c[2].metric("Career L",cp.career_losses); c[3].metric("Titles",cp.championships)
-        if user:
-            st.success(f"You currently coach **{user.name}**.")
-            if g.get("contract_expired"): st.warning("Your contract has expired. You may pursue another eligible opening.")
+        if user: st.success(f"You currently coach **{user.name}**.")
         st.subheader("Coaching Carousel")
         if st.button("Refresh Job Market"): g["job_market"]=generate_job_market(g["teams"],cp); st.rerun()
         if g["job_market"]:
@@ -70,37 +67,26 @@ with tabs[1]:
         st.dataframe(user.history,use_container_width=True,hide_index=True)
     else: st.info("Start Career and accept an eligible job.")
 
-with tabs[3]:
+with tabs[2]:
     if user:
-        if g.get("season_stage")!="regular_season":
-            st.info(f"Game Day is unavailable during the {g.get('season_stage','preseason')} stage. Use Season Hub to advance.")
-        else:
-            pending=[x for x in user.schedule if not x.played]
-            if not pending:
-                g["season_stage"]="postseason"; st.rerun()
-            else:
-                gm=pending[0]; opp=next(t for t in g["teams"] if t.name==gm.opponent)
-                st.header(f"Game Day — {gm.site} vs {opp.name}")
-                a=st.columns(3)
-                tempo=a[0].slider("Tempo",55,82,68); aggression=a[1].slider("Offensive aggression",30,90,60)
-                defense=a[2].selectbox("Defense",["Conservative","Balanced","Aggressive"])
-                st.write(f"Opponent strength: **{opp.ratings()['overall']:.1f}**")
-                if st.button("Play Game",type="primary"):
-                    pf,pa,win=play_game(user,opp,gm.site,tempo,aggression,defense)
-                    gm.played=True; gm.result="W" if win else "L"; gm.points_for=pf; gm.points_against=pa
-                    if gm.conference:
-                        user.conference_wins+=int(win); user.conference_losses+=int(not win)
-                    user.security=clamp(user.security+(1.0 if win else -.8))
-                    for p in user.roster:
-                        p.fatigue=clamp(p.fatigue+random.uniform(3,12)); p.morale=clamp(p.morale+(2 if win else -2))
-                        if random.random()<.025:
-                            p.injured=True; p.injury_weeks=random.randint(1,5)
-                    if all(x.played for x in user.schedule): g["season_stage"]="postseason"
-                    st.success(f"{'WIN' if win else 'LOSS'} — {pf}-{pa}")
-                    st.rerun()
+        pending=[x for x in user.schedule if not x.played]
+        if not pending: generate_schedule(user,g["teams"],g["year"]); pending=[user.schedule[0]]
+        gm=pending[0]; opp=next(t for t in g["teams"] if t.name==gm.opponent)
+        st.header(f"Game Day — {gm.site} vs {opp.name}")
+        a=st.columns(3)
+        tempo=a[0].slider("Tempo",55,82,68); aggression=a[1].slider("Offensive aggression",30,90,60)
+        defense=a[2].selectbox("Defense",["Conservative","Balanced","Aggressive"])
+        st.write(f"Opponent strength: **{opp.ratings()['overall']:.1f}**")
+        if st.button("Play Game",type="primary"):
+            pf,pa,win=play_game(user,opp,gm.site,tempo,aggression,defense)
+            gm.played=True; gm.result="W" if win else "L"; gm.points_for=pf; gm.points_against=pa
+            user.security=clamp(user.security+(1.0 if win else -.8))
+            for p in user.roster: p.fatigue=clamp(p.fatigue+random.uniform(3,12)); p.morale=clamp(p.morale+(2 if win else -2))
+            st.success(f"{'WIN' if win else 'LOSS'} — {pf}-{pa}")
+            st.rerun()
     else: st.info("Take a job first.")
 
-with tabs[4]:
+with tabs[3]:
     if user:
         st.header("Recruiting & NIL")
         pool=update_interest(user,g["recruit_pool"])
@@ -118,7 +104,7 @@ with tabs[4]:
                 else: st.error("Recruiting/NIL requirements not met.")
     else: st.info("Take a job first.")
 
-with tabs[5]:
+with tabs[4]:
     if user:
         st.header("Transfer Portal")
         pool=g.get("transfer_pool",[])
@@ -134,13 +120,13 @@ with tabs[5]:
             g["transfer_pool"]=process_transfer_portal(g["teams"]); st.rerun()
     else: st.info("Take a job first.")
 
-with tabs[6]:
+with tabs[5]:
     if user:
         if not user.schedule: generate_schedule(user,g["teams"],g["year"])
         st.dataframe([vars(x) for x in user.schedule],use_container_width=True,hide_index=True)
     else: st.info("Take a job first.")
 
-with tabs[7]:
+with tabs[6]:
     if user:
         st.header("Roster & Development")
         st.dataframe([{"Name":p.name,"Pos":p.pos,"OVR":p.overall,"Pot":p.potential,"Year":p.year,"Morale":round(p.morale),
@@ -152,7 +138,7 @@ with tabs[7]:
             st.success("Development session complete."); st.rerun()
     else: st.info("Take a job first.")
 
-with tabs[8]:
+with tabs[7]:
     if user:
         st.header("Staff & Facilities")
         st.dataframe([vars(s) for s in user.staff],use_container_width=True,hide_index=True)
@@ -170,52 +156,43 @@ with tabs[8]:
     else: st.info("Take a job first.")
 
 with tabs[9]:
+    st.header("🌎 National Results & Rankings")
+    st.caption("Every team in the country. Rankings update as games are played.")
+    from simulation import national_rankings, national_results
+    rankings=national_rankings(g["teams"])
+    if rankings:
+        st.dataframe([{"Rank":i+1,**row} for i,row in enumerate(rankings)],
+                     use_container_width=True,hide_index=True)
+    st.subheader("National Game Results")
+    results=national_results(g["teams"])
+    st.dataframe(results,use_container_width=True,hide_index=True)
+
+with tabs[10]:
+    st.header("🏆 Conference Standings")
+    conferences=sorted(set(t.conference for t in g["teams"]))
+    conf=st.selectbox("Conference",conferences)
+    from simulation import conference_standings
+    st.dataframe(conference_standings(g["teams"],conf),use_container_width=True,hide_index=True)
+
+with tabs[11]:
+    st.header("March Madness & Postseason")
+    st.subheader("Conference Tournaments")
+    conf_rows=[]
+    for conf in sorted(set(t.conference for t in g["teams"])):
+        members=[t for t in g["teams"] if t.conference==conf]
+        champ=max(members,key=lambda x:(x.conference_wins,x.wins,x.adjusted_prestige))
+        conf_rows.append({"Conference":conf,"Projected/Recorded Champion":champ.name,
+                          "Record":f"{champ.wins}-{champ.losses}"})
+    st.dataframe(conf_rows,use_container_width=True,hide_index=True)
+    st.subheader("NCAA / Postseason Results")
+    post=sorted([{"Team":t.name,"Record":f"{t.wins}-{t.losses}",
+                  "Seed":t.ncaa_seed or "—","Result":t.tournament_result or "Not selected"}
+                 for t in g["teams"]],key=lambda x:(x["Seed"]=="—", str(x["Seed"]),x["Team"]))
+    st.dataframe(post,use_container_width=True,hide_index=True)
+
+with tabs[12]:
     if user:
         st.header("Program History")
         if user.history: st.dataframe(user.history,use_container_width=True,hide_index=True)
         else: st.info("Your season history will appear here.")
     else: st.info("Take a job first.")
-with tabs[2]:
-    st.header("Season Hub")
-    if user:
-        stage=g.get("season_stage","preseason")
-        c=st.columns(5)
-        c[0].metric("Stage",stage.title()); c[1].metric("Record",f"{user.wins}-{user.losses}")
-        c[2].metric("Contract",f"{g['contract'].remaining_years if g.get('contract') else 0} yrs")
-        c[3].metric("Budget",f"${user.budget:,}"); c[4].metric("NIL",f"${user.nil_budget:,}")
-        st.divider()
-        if stage=="preseason":
-            st.subheader("Preseason")
-            st.write("Set your roster, staff, NIL strategy and schedule before opening night.")
-            if not user.schedule:
-                generate_schedule(user,g["teams"],g["year"])
-            st.write(f"**{len(user.schedule)} games scheduled.**")
-            if st.button("Begin Regular Season",type="primary"):
-                g["season_stage"]="regular_season"; g["season_started"]=True; st.rerun()
-        elif stage=="regular_season":
-            played=sum(x.played for x in user.schedule); total=len(user.schedule)
-            st.progress(played/max(1,total),text=f"Regular season: {played}/{total} games")
-            st.info("Play games from the Game Day tab. The season automatically advances when all scheduled games are complete.")
-            if played>=total and total:
-                g["season_stage"]="postseason"; st.rerun()
-        elif stage=="postseason":
-            st.subheader("Postseason")
-            st.write("Your conference tournament and NCAA tournament are ready.")
-            if st.button("Run Postseason",type="primary"):
-                finish_season(g); st.rerun()
-        elif stage=="offseason":
-            st.subheader("Offseason")
-            if g.get("last_season"):
-                st.write(g["last_season"])
-            st.write("Graduation, player development, transfers, budgets and the coaching carousel are processed together.")
-            if g.get("contract_expired"): st.warning("Your contract has expired. A new deal can be negotiated through the Career tab.")
-            if g.get("season_awards"): st.write("Awards:",g["season_awards"])
-            if st.button("Advance to Next Season",type="primary"):
-                advance_offseason(g); st.rerun()
-        if g.get("fired"):
-            st.error("You were fired. Return to Career to select a new eligible job.")
-            if st.button("Open Career Job Market"): g["fired"]=False; g["career_started"]=True; g["job_market"]=generate_job_market(g["teams"],g["career_profile"]); st.rerun()
-    else:
-        st.info("Start Career and accept a job to enter the dynasty loop.")
-
-

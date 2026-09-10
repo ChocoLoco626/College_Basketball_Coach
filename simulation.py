@@ -25,27 +25,17 @@ def play_game(user,opp,site="Home",tempo=68,aggression=60,defense="Balanced"):
     return pf,pa,win
 
 def generate_schedule(team,teams,year):
-    others=[t for t in teams if t.name!=team.name]
-    random.shuffle(others)
-    conf=[t for t in others if t.conference==team.conference]
-    games=[]; used=[]
-    # Double round robin against available conference opponents, capped to 18.
+    others=[t for t in teams if t.name!=team.name]; random.shuffle(others)
+    conf=[t for t in others if t.conference==team.conference][:10]
+    non=[t for t in others if t not in conf][:12]
+    games=[]
     for t in conf:
-        if len(games)>=18: break
         games += [Game(t.name,"Home",f"{year}-01-{random.randint(1,28):02d}",True,importance=1.3),
                   Game(t.name,"Away",f"{year}-02-{random.randint(1,28):02d}",True,importance=1.3)]
-    # Fill to a 30-game regular season with non-conference opponents.
-    non=[t for t in others if t.conference!=team.conference]
-    random.shuffle(non)
-    i=0
-    while len(games)<30 and (non or others):
-        pool=non if non else others
-        t=pool[i%len(pool)]; i+=1
-        site=random.choice(["Home","Away","Neutral"])
-        games.append(Game(t.name,site,f"{year}-{random.choice([11,12]):02d}-{random.randint(1,28):02d}",False,importance=1.0))
-        if i>len(pool)*3 and not non: break
-    team.schedule=games[:30]
-    return team.schedule
+    for t in non:
+        games.append(Game(t.name,random.choice(["Home","Away","Neutral"]),
+                          f"{year}-{random.choice([11,12]):02d}-{random.randint(1,28):02d}"))
+    team.schedule=games[:32]; return team.schedule
 
 def advance_week(team):
     for p in team.roster:
@@ -55,3 +45,30 @@ def advance_week(team):
             if p.injury_weeks<=0: p.injured=False
         p.morale=clamp(p.morale+random.uniform(-2,2))
     return team
+
+
+def national_rankings(teams):
+    rows=[]
+    for t in teams:
+        played=t.wins+t.losses
+        win_pct=t.wins/max(1,played)
+        strength=t.adjusted_prestige*0.35+t.ratings()["overall"]*0.45+win_pct*100*0.20
+        rows.append({"Team":t.name,"Conference":t.conference,"Record":f"{t.wins}-{t.losses}",
+                     "Win%":round(win_pct,3),"NET-like":round(strength,1),
+                     "SOS":round(t.adjusted_prestige*.55+t.ratings()["overall"]*.45,1)})
+    return sorted(rows,key=lambda x:(x["NET-like"],x["Win%"]),reverse=True)
+
+def conference_standings(teams, conference):
+    members=[t for t in teams if t.conference==conference]
+    rows=[]
+    for t in members:
+        rows.append({"Team":t.name,"W":t.conference_wins,"L":t.conference_losses,
+                     "Pct":round(t.conference_wins/max(1,t.conference_wins+t.conference_losses),3),
+                     "Overall":f"{t.wins}-{t.losses}","Prestige":round(t.adjusted_prestige,1)})
+    return sorted(rows,key=lambda x:(x["W"],x["Pct"]),reverse=True)
+
+def national_results(teams):
+    return sorted([{"Team":t.name,"Conference":t.conference,"Record":f"{t.wins}-{t.losses}",
+                    "NET-like":round(t.adjusted_prestige*.45+t.ratings()["overall"]*.55,1),
+                    "Postseason":t.tournament_result or "—"} for t in teams],
+                  key=lambda x:x["NET-like"],reverse=True)
