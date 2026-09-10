@@ -47,6 +47,36 @@ class Recruit:
 class Game:
     opponent:str; site:str; date:str; conference:bool=False; played:bool=False; result:Optional[str]=None; score_for:int=0; score_against:int=0
 @dataclass
+def safe_player(name="Replacement", pos="PG", overall=50):
+    return _make_repair_player("System",0,pos,int(overall),name_override=name)
+
+def _make_repair_player(team_name, idx, pos, overall, name_override=None):
+    vals={
+        "name":name_override or f"{team_name} Player {idx}",
+        "pos":pos,
+        "overall":overall,
+        "potential":min(99,overall+random.randint(2,15)),
+        "offense":overall,
+        "defense":overall,
+        "shooting":overall,
+        "passing":overall,
+        "handling":overall,
+        "rebounding":overall,
+        "athleticism":overall,
+        "iq":overall,
+        "height":random.choice([72,74,76,78,80,82]),
+        "year":random.choice(["FR","SO","JR","SR"]),
+        "morale":random.randint(60,90),
+        "fatigue":0,
+        "fouls":0,
+        "minutes":0,
+        "role":"Rotation",
+        "nil_value":random.randint(0,100000),
+        "scholarship":True,
+    }
+    return Player(*[vals[f] for f in ['name', 'pos', 'overall', 'potential', 'offense', 'defense', 'shooting', 'passing', 'handling', 'rebounding', 'athleticism', 'iq', 'height', 'year', 'morale', 'fatigue', 'fouls', 'minutes', 'role', 'nil_value', 'scholarship']])
+
+
 class Team:
     name:str; conference:str; espn_id:int; historical:float; current:float; academics:float; facilities:float; budget:int; nil_budget:int; coach:Coach; staff:List[Staff]; roster:List[Player]
     wins:int=0; losses:int=0; cwins:int=0; closses:int=0; net:float=50; sos:float=50; security:float=70; schedule:List[Game]=field(default_factory=list)
@@ -74,7 +104,7 @@ class Team:
         ps=sorted(valid,key=lambda p:_num(getattr(p,"overall",50),50),reverse=True)
         top=ps[:10]
         if not top:
-            top=[Player("Replacement","PG",50,50,50,50,50,50,50,50,50,50,50)]
+            top=[_make_repair_player(self.name,0,"PG",50)]
         def av(k):
             return sum(_num(getattr(p,k,50),50) for p in top)/len(top)
         depth=clamp(sum(_num(getattr(p,"overall",50),50) for p in ps)/max(1,len(ps)) + min(10,len(ps))*0.25)
@@ -437,35 +467,35 @@ def dec(x):
     return x
 
 if "g" not in st.session_state:st.session_state.g=new_game()
-def _make_repair_player(team_name, idx, pos, overall):
-    vals={
-        "name":f"{team_name} Player {idx}",
-        "pos":pos,
-        "overall":overall,
-        "potential":min(99,overall+random.randint(2,15)),
-        "offense":overall,
-        "defense":overall,
-        "shooting":overall,
-        "passing":overall,
-        "handling":overall,
-        "rebounding":overall,
-        "athleticism":overall,
-        "iq":overall,
-        "height":random.choice([72,74,76,78,80,82]),
-        "year":random.choice(["FR","SO","JR","SR"]),
-        "morale":random.randint(60,90),
+def normalize_player_state(p):
+    defaults={
+        "potential":_num(getattr(p,"overall",50),50),
+        "offense":_num(getattr(p,"overall",50),50),
+        "defense":_num(getattr(p,"overall",50),50),
+        "shooting":_num(getattr(p,"overall",50),50),
+        "passing":_num(getattr(p,"overall",50),50),
+        "handling":_num(getattr(p,"overall",50),50),
+        "rebounding":_num(getattr(p,"overall",50),50),
+        "athleticism":_num(getattr(p,"overall",50),50),
+        "iq":_num(getattr(p,"overall",50),50),
+        "height":76,
+        "year":"SO",
+        "morale":75,
         "fatigue":0,
         "fouls":0,
         "minutes":0,
         "role":"Rotation",
-        "nil_value":random.randint(0,100000),
+        "nil_value":0,
         "scholarship":True,
     }
-    return Player(*[vals[f] for f in ['name', 'pos', 'overall', 'potential', 'offense', 'defense', 'shooting', 'passing', 'handling', 'rebounding', 'athleticism', 'iq', 'height', 'year', 'morale', 'fatigue', 'fouls', 'minutes', 'role', 'nil_value', 'scholarship']])
+    for k,v in defaults.items():
+        if not hasattr(p,k):
+            setattr(p,k,v)
+    return p
 
 def normalize_roster_state(g):
     for t in g["teams"]:
-        cleaned=[p for p in (getattr(t,"roster",[]) or []) if isinstance(p, Player)]
+        cleaned=[normalize_player_state(p) for p in (getattr(t,"roster",[]) or []) if isinstance(p, Player)]
         if len(cleaned)<8:
             positions=["PG","SG","SF","PF","C"]
             for i in range(len(cleaned),13):
