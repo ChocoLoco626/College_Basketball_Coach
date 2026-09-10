@@ -40,16 +40,16 @@ class Coach:
 @dataclass
 class Player:
     name:str; pos:str; overall:float; potential:float; offense:float; defense:float; shooting:float; passing:float; handling:float; rebounding:float; athleticism:float; iq:float; height:int; year:int; morale:float; fatigue:float=0; fouls:int=0; minutes:float=0; role:str="Rotation"; nil_value:int=0; scholarship:bool=True
+def safe_player(name="Replacement", pos="PG", overall=50):
+    return _make_repair_player("System",0,pos,int(overall),name_override=name)
+
+
 @dataclass
 class Recruit:
     name:str; pos:str; stars:int; overall:float; potential:float; nil_expectation:int; academic:float; hometown:str; preference:str; interest:Dict[str,float]=field(default_factory=dict); committed:Optional[str]=None
 @dataclass
 class Game:
     opponent:str; site:str; date:str; conference:bool=False; played:bool=False; result:Optional[str]=None; score_for:int=0; score_against:int=0
-@dataclass
-def safe_player(name="Replacement", pos="PG", overall=50):
-    return _make_repair_player("System",0,pos,int(overall),name_override=name)
-
 def _make_repair_player(team_name, idx, pos, overall, name_override=None):
     vals={
         "name":name_override or f"{team_name} Player {idx}",
