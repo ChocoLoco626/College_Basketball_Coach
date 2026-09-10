@@ -418,7 +418,7 @@ def make_contract(t, profile, offer):
 
 def new_game():
     teams=new_world()
-    g={"year":2026,"teams":teams,"recruits":recruit_pool(),"portal":[],"free_coaches":[],"user":None,
+    g={"schema_version":SAVE_SCHEMA_VERSION,"year":2026,"teams":teams,"recruits":recruit_pool(),"portal":[],"free_coaches":[],"user":None,
        "season_stage":"preseason","history":[],"champion":None,"rounds":[],"field":[],"news":[],"career_mode":False,"job_market":[],"contract":None,"career_history":[],"career_profile":None}
     make_schedule(g);return g
 
@@ -436,17 +436,65 @@ def dec(x):
     return x
 
 if "g" not in st.session_state:st.session_state.g=new_game()
+def _make_repair_player(team_name, idx, pos, overall):
+    vals={
+        "name":f"{team_name} Player {idx}",
+        "pos":pos,
+        "overall":overall,
+        "potential":min(99,overall+random.randint(2,15)),
+        "offense":overall,
+        "defense":overall,
+        "shooting":overall,
+        "passing":overall,
+        "handling":overall,
+        "rebounding":overall,
+        "athleticism":overall,
+        "iq":overall,
+        "height":random.choice([72,74,76,78,80,82]),
+        "year":random.choice(["FR","SO","JR","SR"]),
+        "morale":random.randint(60,90),
+        "fatigue":0,
+        "fouls":0,
+        "minutes":0,
+        "role":"Rotation",
+        "nil_value":random.randint(0,100000),
+        "scholarship":True,
+    }
+    return Player(*[vals[f] for f in ['name', 'pos', 'overall', 'potential', 'offense', 'defense', 'shooting', 'passing', 'handling', 'rebounding', 'athleticism', 'iq', 'height', 'year', 'morale', 'fatigue', 'fouls', 'minutes', 'role', 'nil_value', 'scholarship']])
+
 def normalize_roster_state(g):
     for t in g["teams"]:
-        cleaned=[p for p in (t.roster or []) if isinstance(p, Player)]
+        cleaned=[p for p in (getattr(t,"roster",[]) or []) if isinstance(p, Player)]
         if len(cleaned)<8:
             positions=["PG","SG","SF","PF","C"]
             for i in range(len(cleaned),13):
                 pos=positions[i%5]
-                base=int(_num(t.current,50))
+                base=int(_num(getattr(t,"current",50),50))
                 ov=max(45,min(78,base-18+random.randint(0,23)))
-                cleaned.append(Player(f"{t.name} Player {i+1}",pos,ov,ov,ov,ov,ov,ov,ov,ov,ov,ov,ov))
+                cleaned.append(_make_repair_player(t.name,i+1,pos,ov))
         t.roster=cleaned
+
+
+SAVE_SCHEMA_VERSION=9
+
+def migrate_game_state(g):
+    """Migrate old dynasty/session data to the current schema without losing valid data."""
+    if not isinstance(g,dict):
+        return new_game()
+    g.setdefault("schema_version",1)
+    g.setdefault("career_mode",False)
+    g.setdefault("job_market",[])
+    g.setdefault("career_job_offers",[])
+    g.setdefault("career_history",[])
+    g.setdefault("career_interview_notes",{})
+    g.setdefault("career_job_history",[])
+    g.setdefault("career_profile",None)
+    g.setdefault("contract",None)
+    g.setdefault("coach_name","Coach")
+    if not isinstance(g.get("teams"),list):
+        g["teams"]=make_teams()
+    g["schema_version"]=SAVE_SCHEMA_VERSION
+    return g
 
 def normalize_team_state(g):
     for t in g["teams"]:
@@ -472,6 +520,7 @@ def normalize_team_state(g):
             t.staff=staff_for(t.current)
 
 g=st.session_state.g
+g=migrate_game_state(g)
 normalize_team_state(g)
 normalize_roster_state(g)
 for _team in g["teams"]:
