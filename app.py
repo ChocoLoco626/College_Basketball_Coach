@@ -1,4 +1,5 @@
 
+SAVE_SCHEMA_VERSION=10
 import streamlit as st
 import random, math, json
 from dataclasses import dataclass, field, asdict
@@ -475,7 +476,6 @@ def normalize_roster_state(g):
         t.roster=cleaned
 
 
-SAVE_SCHEMA_VERSION=9
 
 def migrate_game_state(g):
     """Migrate old dynasty/session data to the current schema without losing valid data."""
